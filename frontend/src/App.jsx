@@ -1,257 +1,152 @@
 import React, { useState } from 'react';
-import { Search, Loader2, Download, Copy, CheckCircle2, Mail, Globe, Shield, ExternalLink } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import clsx from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import { Search, Loader2, Mail, LogIn, Layers, MessageSquare, ExternalLink } from 'lucide-react';
+import { useGoogleLogin } from '@react-oauth/google';
+import axios from 'axios';
 
-function cn(...classes) {
-  return twMerge(clsx(classes));
-}
-
-const fadeIn = {
-  initial: { opacity: 0, y: 20 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -20 }
-};
-
-const staggerContainer = {
-  animate: {
-    transition: {
-      staggerChildren: 0.1
-    }
-  }
-};
+const BACKEND_URL = 'http://localhost:3001';
 
 function App() {
-  const [url, setUrl] = useState('');
+  const [searchWord, setSearchWord] = useState('');
   const [isScraping, setIsScraping] = useState(false);
-  const [progress, setProgress] = useState(null);
-  const [emails, setEmails] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [error, setError] = useState(null);
-  const [copiedId, setCopiedId] = useState(null);
+  const [user, setUser] = useState(null);
+  const [token, setToken] = useState(null);
+
+  const login = useGoogleLogin({
+    onSuccess: async (response) => {
+      setToken(response.access_token);
+      try {
+        const userInfo = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${response.access_token}` }
+        });
+        setUser(userInfo.data);
+      } catch (err) {
+        console.error('Failed to get user info', err);
+      }
+    },
+    scope: 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.profile',
+  });
 
   const startScraping = async (e) => {
-    e.preventDefault();
-    if (!url) return;
-    
+    if (e) e.preventDefault();
+    if (!token) return;
+
     setIsScraping(true);
-    setProgress({ status: 'started', message: 'Initializing connection...' });
-    setEmails([]);
+    setGroups([]);
     setError(null);
-    
-    const clientId = Math.random().toString(36).substring(7);
-    
-    const sse = new window.EventSource(`https://email-scraper-a306.onrender.com/api/scrape/progress?clientId=${clientId}`);
-    sse.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setProgress(data);
-    };
-    sse.onerror = () => {
-      sse.close();
-    };
 
     try {
-      const response = await fetch('https://email-scraper-a306.onrender.com/api/scrape', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, clientId, maxPages: 50 })
+      const response = await axios.post(`${BACKEND_URL}/api/gmail/scrape`, {
+        token,
+        searchWord
       });
-      
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to scrape URL');
+      if (response.data.success) {
+        setGroups(response.data.groups);
       }
-      
-      setEmails(result.emails);
-      setProgress({ status: 'finished', totalEmails: result.emails.length, scannedPages: result.scannedPages });
     } catch (err) {
-      setError(err.message);
-      setProgress(null);
+      setError(err.response?.data?.error || err.message);
     } finally {
       setIsScraping(false);
-      sse.close();
     }
   };
 
-  const copyToClipboard = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(text);
-    setTimeout(() => setCopiedId(null), 2000);
-  };
+  const [expandedGroups, setExpandedGroups] = useState([]);
 
-  const downloadCSV = () => {
-    const csvContent = "data:text/csv;charset=utf-8," + emails.join("\n");
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "extracted_emails.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  const toggleGroup = (index) => {
+    setExpandedGroups(prev =>
+      prev.includes(index) ? prev.filter(i => i !== index) : [...prev, index]
+    );
   };
 
   return (
-    <div className="min-h-screen mesh-gradient flex flex-col items-center py-16 px-4 selection:bg-purple-500/30 overflow-x-hidden">
-      
-      {/* Background Decorative Elements */}
-      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-full max-w-7xl h-full -z-10 pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-600/10 blur-[120px] rounded-full" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full" />
-      </div>
-
-      {/* Header */}
-      <motion.header 
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="text-center mb-12 max-w-3xl w-full"
-      >
-        <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-10 bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent">
-          Email <span className="text-purple-500">Scraper</span> Pro
+    <div className="container">
+      <header style={{ textAlign: 'center', marginBottom: '3rem' }}>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: '800', color: '#1e293b', marginBottom: '0.5rem' }}>
+          Email-Scraper
         </h1>
 
-        <form onSubmit={startScraping} className="relative group max-w-2xl mx-auto">
-          <div className="absolute -inset-0.5 bg-gradient-to-r from-purple-500 to-blue-500 rounded-2xl blur opacity-30 group-focus-within:opacity-60 transition duration-1000 group-hover:duration-200"></div>
-          <div className="relative flex items-center bg-[#0d0d1a] rounded-2xl p-2 border border-white/10">
-            <div className="pl-4 text-slate-500">
-              <Globe size={20} />
-            </div>
-            <input
-              type="url"
-              placeholder="https://example.com"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              className="w-full bg-transparent border-none focus:ring-0 text-white placeholder:text-slate-600 px-4 py-3 text-lg"
-              required
-            />
-            <button 
-              type="submit" 
-              disabled={isScraping}
-              className="bg-white text-black hover:bg-slate-200 px-6 py-3 rounded-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:scale-[1.02] active:scale-95 whitespace-nowrap"
-            >
-              {isScraping ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
-              {isScraping ? 'Extracting...' : 'Scan Domain'}
+      </header>
+
+      <main style={{ maxWidth: '600px', margin: '0 auto' }}>
+        {!user ? (
+          <div className="card" style={{ padding: '3rem', textAlign: 'center' }}>
+            <LogIn size={48} color="#3b82f6" style={{ marginBottom: '1.5rem', opacity: 0.8 }} />
+            <h2 style={{ marginBottom: '1rem' }}>Welcome</h2>
+            <p style={{ color: '#64748b', marginBottom: '2rem' }}>Please sign in with Google to organize your inbox.</p>
+            <button onClick={() => login()} className="btn-primary" style={{ width: '100%' }}>
+              Sign in with Google
             </button>
           </div>
-        </form>
-      </motion.header>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            <div className="card" style={{ padding: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <img src={user.picture} alt="User" style={{ width: '40px', height: '40px', borderRadius: '50%' }} />
+                <span style={{ fontWeight: '600' }}>{user.name}</span>
+              </div>
+              <button onClick={() => { setUser(null); setToken(null); setGroups([]); }} style={{ fontSize: '0.875rem', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' }}>
+                Logout
+              </button>
+            </div>
 
-      {/* Main Content */}
-      <main className="w-full max-w-4xl space-y-8">
-        
-        <AnimatePresence mode="wait">
-          {(progress || error) && (
-            <motion.div 
-              {...fadeIn}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              {progress && (
-                <div className="glass-card rounded-2xl p-4 flex flex-col justify-center">
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                      <Shield size={12} className="text-purple-500" /> System Status
-                    </h3>
-                    {isScraping && <div className="flex gap-1"><div className="w-1 h-1 rounded-full bg-purple-500 animate-pulse" /><div className="w-1 h-1 rounded-full bg-purple-500 animate-pulse delay-75" /></div>}
+            <form onSubmit={startScraping} style={{ display: 'flex', gap: '0.5rem' }}>
+              <input
+                type="text"
+                placeholder="Search word (optional)..."
+                value={searchWord}
+                onChange={(e) => setSearchWord(e.target.value)}
+                className="input-field"
+              />
+              <button type="submit" disabled={isScraping} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                {isScraping ? <Loader2 size={18} className="animate-spin" /> : <Search size={18} />}
+                Scrape
+              </button>
+            </form>
+
+            {error && (
+              <div style={{ padding: '1rem', backgroundColor: '#fef2f2', color: '#b91c1c', borderRadius: '8px', border: '1px solid #fee2e2', fontSize: '0.875rem' }}>
+                {error}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {groups.map((group, idx) => (
+                <div key={idx} className="card" style={{ overflow: 'hidden' }}>
+                  <div
+                    style={{ padding: '1.25rem', borderBottom: '1px solid #e2e8f0', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }}
+                    onClick={() => toggleGroup(idx)}
+                  >
+                    <h3 style={{ fontSize: '1rem', fontWeight: '700' }}>{group.context}</h3>
+                    <span style={{ fontSize: '0.75rem', fontWeight: '600', color: '#3b82f6', backgroundColor: '#eff6ff', padding: '0.25rem 0.75rem', borderRadius: '9999px' }}>
+                      {group.count} emails {expandedGroups.includes(idx) ? '▴' : '▾'}
+                    </span>
                   </div>
-                  
-                  <div className="text-xs text-slate-300">
-                    {progress.status === 'started' && <p>{progress.message}</p>}
-                    {progress.status === 'scraping' && (
-                      <div className="flex items-center gap-4">
-                        <div className="flex-1 h-1 bg-white/5 rounded-full overflow-hidden">
-                          <motion.div 
-                            className="h-full bg-purple-500"
-                            initial={{ width: 0 }}
-                            animate={{ width: `${(progress.pagesScanned / (progress.maxPages || 20)) * 100}%` }}
-                          />
+                  <div style={{ padding: '1.25rem' }}>
+                    {(expandedGroups.includes(idx) ? group.emails : group.emails.slice(0, 3)).map((email, eIdx) => (
+                      <div key={eIdx} style={{ padding: '0.75rem 0', borderBottom: '1px solid #f1f5f9' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                          <span style={{ fontSize: '0.875rem', fontWeight: '600' }}>{email.from}</span>
+                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{new Date(email.date).toLocaleDateString()}</span>
                         </div>
-                        <span className="font-mono opacity-50 whitespace-nowrap">{progress.pagesScanned} / {progress.maxPages || 20}</span>
+                        <p style={{ fontSize: '0.875rem', color: '#64748b' }}>{email.snippet}</p>
                       </div>
-                    )}
-                    {progress.status === 'finished' && (
-                      <p className="text-green-400 font-medium">Scan Complete: {progress.totalEmails} emails found</p>
+                    ))}
+                    {group.count > 3 && !expandedGroups.includes(idx) && (
+                      <p
+                        style={{ fontSize: '0.75rem', color: '#3b82f6', textAlign: 'center', marginTop: '1rem', cursor: 'pointer', fontWeight: '600' }}
+                        onClick={() => toggleGroup(idx)}
+                      >
+                        + {group.count - 3} more messages (Click to expand)
+                      </p>
                     )}
                   </div>
                 </div>
-              )}
-
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl text-red-400 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                  <p className="text-xs font-mono truncate">{error}</p>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <AnimatePresence mode="wait">
-          {emails.length > 0 ? (
-            <motion.div 
-              key="results"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
-              className="glass-card rounded-[2rem] overflow-hidden flex flex-col"
-            >
-              <div className="p-6 md:p-8 border-b border-white/5 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <h2 className="text-xl font-bold text-white flex items-center gap-3">
-                  <Mail className="text-purple-500" size={20} />
-                  Extracted Results
-                </h2>
-                <button 
-                  onClick={downloadCSV}
-                  className="flex items-center gap-2 text-xs bg-purple-600 hover:bg-purple-500 text-white px-5 py-2.5 rounded-xl transition-all font-bold shadow-lg shadow-purple-600/20 active:scale-95"
-                >
-                  <Download size={14} /> Export CSV
-                </button>
-              </div>
-
-              <div className="p-4 md:p-6">
-                <motion.div 
-                  variants={staggerContainer}
-                  initial="initial"
-                  animate="animate"
-                  className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar"
-                >
-                  {emails.map((email, idx) => (
-                    <motion.div 
-                      key={idx}
-                      variants={fadeIn}
-                      className="group flex justify-between items-center px-4 py-3 bg-white/[0.02] border border-white/5 hover:bg-white/[0.05] hover:border-purple-500/30 rounded-xl transition-all duration-300"
-                    >
-                      <a href={`mailto:${email}`} className="text-slate-300 text-sm group-hover:text-white transition-colors truncate font-medium">
-                        {email}
-                      </a>
-                      <button 
-                        onClick={() => copyToClipboard(email)}
-                        className="p-1.5 text-slate-500 hover:text-purple-400 rounded-lg hover:bg-purple-500/10 transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        {copiedId === email ? <CheckCircle2 size={14} className="text-green-500" /> : <Copy size={14} />}
-                      </button>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              </div>
-            </motion.div>
-          ) : (
-            !isScraping && !error && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="py-20 flex flex-col items-center justify-center text-slate-600 glass-card rounded-[2rem] border-dashed border-white/5"
-              >
-                <Mail size={40} className="mb-4 opacity-10" />
-                <p className="text-sm font-light">No data extracted yet.</p>
-              </motion.div>
-            )
-          )}
-        </AnimatePresence>
-
+              ))}
+            </div>
+          </div>
+        )}
       </main>
-
-      <footer className="mt-auto py-10 text-slate-600 text-[10px] font-mono tracking-widest text-center">
-        <p>&copy; 2024 EMAIL SCRAPER PRO</p>
-      </footer>
     </div>
   );
 }
